@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#define SHELL_RL_BUFSIZE 1024
+#define shell_TOK_BUFSIZE 64
+#define shell_TOK_DELIM " \t\r\n\a"
+
 /*
   Function Declarations for builtin shell commands:
  */
@@ -148,7 +152,12 @@ int shell_execute(char **args) {
   }
   if (i > 0 && strcmp(args[i - 1], "ECHO") == 0) {
     for (int j = 0; j < i - 1; j++) {
-      printf("%s\n", args[j]);
+      if (strcmp(args[j], "|") != 0) {
+        printf("%s\n", args[j]);
+      } else {
+        printf("PIPE\n");
+      }
+      printf("SPACE\n");
     }
     return 1;
   }
@@ -167,21 +176,7 @@ int shell_execute(char **args) {
    @return The line from stdin.
  */
 char *shell_read_line(void) {
-#ifdef shell_USE_STD_GETLINE
-  char *line = NULL;
-  ssize_t bufsize = 0; // have getline allocate a buffer for us
-  if (getline(&line, &bufsize, stdin) == -1) {
-    if (feof(stdin)) {
-      exit(EXIT_SUCCESS);  // We received an EOF
-    } else  {
-      perror("shell: getline\n");
-      exit(EXIT_FAILURE);
-    }
-  }
-  return line;
-#else
-#define shell_RL_BUFSIZE 1024
-  int bufsize = shell_RL_BUFSIZE;
+  int bufsize = SHELL_RL_BUFSIZE;
   int position = 0;
   char *buffer = malloc(sizeof(char) * bufsize);
   int c;
@@ -207,7 +202,7 @@ char *shell_read_line(void) {
 
     // If we have exceeded the buffer, reallocate.
     if (position >= bufsize) {
-      bufsize += shell_RL_BUFSIZE;
+      bufsize += SHELL_RL_BUFSIZE;
       buffer = realloc(buffer, bufsize);
       if (!buffer) {
         fprintf(stderr, "shell: allocation error\n");
@@ -215,11 +210,8 @@ char *shell_read_line(void) {
       }
     }
   }
-#endif
 }
 
-#define shell_TOK_BUFSIZE 64
-#define shell_TOK_DELIM " \t\r\n\a"
 /**
    @brief Split a line into tokens (very naively).
    @param line The line.
