@@ -17,7 +17,8 @@ int shell_help(char **args);
 int shell_cd(char **args);
 int shell_mkdir(char **args);
 int shell_exit(char **args);
-//this is for a test, leave comment pls
+
+//this is for a commit test, leave comment pls
 /*
   List of builtin commands, followed by their corresponding functions.
  */
@@ -27,6 +28,7 @@ char *builtin_str[] = {
   "mkdir",
   "exit"
 };
+char *previous_command = NULL;
 
 int (*builtin_func[]) (char **) = {
   &shell_help,
@@ -76,6 +78,21 @@ int shell_cd(char **args) {
     }
   }
   return 1;
+}
+
+/**
+  @brief Builtin command: Recall previous command (!!)
+  @param args List of args. args[0] is "!!"
+  @return Always return 1, to continue executing
+ */
+int shell_previous_command(char **args) {
+  if (strcmp(args[0], "!!") == 0) {
+    if (previous_command == NULL) {
+      fprintf(stderr, "there is no previous command");
+    } else {
+      shell_execute(previous_command); //can add previous command definitions in other func
+    }
+  }
 }
 
 /**
