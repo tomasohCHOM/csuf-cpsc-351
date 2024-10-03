@@ -28,7 +28,7 @@ char *builtin_str[] = {
   "mkdir",
   "exit"
 };
-char *previous_command = NULL;
+char previous_command = NULL;
 
 int (*builtin_func[]) (char **) = {
   &shell_help,
@@ -156,7 +156,6 @@ int shell_execute(char **args) {
     return 1;
   }
   //previous_command = NULL;
-  previous_command = args;
   if (strcmp(args[0], "!!") == 0) {
     if (previous_command == NULL) {
       fprintf(stderr, "there is no previous command");
@@ -186,7 +185,7 @@ int shell_execute(char **args) {
       return (*builtin_func[i])(args);
     }
   }
-
+  previous_command = args;
   return shell_launch(args);
 }
 
