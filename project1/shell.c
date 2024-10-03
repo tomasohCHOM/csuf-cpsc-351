@@ -86,13 +86,7 @@ int shell_cd(char **args) {
   @return Always return 1, to continue executing
  */
 int shell_previous_command(char **args) {
-  if (strcmp(args[0], "!!") == 0) {
-    if (previous_command == NULL) {
-      fprintf(stderr, "there is no previous command");
-    } else {
-      shell_execute(previous_command); //can add previous command definitions in other func
-    }
-  }
+  
 }
 
 /**
@@ -161,7 +155,15 @@ int shell_execute(char **args) {
     // An empty command was entered.
     return 1;
   }
-
+  //previous_command = NULL;
+  previous_command = args;
+  if (strcmp(args[0], "!!") == 0) {
+    if (previous_command == NULL) {
+      fprintf(stderr, "there is no previous command");
+    } else {
+      shell_execute(previous_command); //can add previous command definitions in other func
+    }
+  }
   // Check for ECHO
   i = 0;
   while (args[i] != NULL) {
