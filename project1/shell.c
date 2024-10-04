@@ -196,7 +196,23 @@ int shell_execute(char **args) {
   previous_command = args;
   return shell_launch(args);
 }
+int pipe_func(char **args) {
+  int pipearr[2];
+  pid_t pid1, pid2;
+  if (pipe(pipearr) < 0) {fprintf(stderr, "Pipe process failed");}
+  pid1 = fork();
+  if (pid1 == 0) {
+    dup2(pipearr[1],STDOUT_FILENO);
+    close(pipearr[0]);
+    close(pipearr[1]);
+  }
 
+  pid2 = fork();
+  if (pid2 == 0) {
+    dup2(pipearr[0], STDIN_FILENO);
+
+  }
+}
 /**
    @brief Read a line of input from stdin.
    @return The line from stdin.
