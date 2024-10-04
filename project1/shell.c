@@ -179,6 +179,14 @@ int shell_execute(char **args) {
     }
     return 1;
   }
+  //checks for pipe symbol, maybe runs another function to see a | b
+  int j = 0;
+  while (args[j] != NULL) {
+    if (strcmp(args[i], "|") == 0) {
+      pipe_func(args);
+    }
+  }
+  return 1;
 
   for (i = 0; i < shell_num_builtins(); i++) {
     if (strcmp(args[0], builtin_str[i]) == 0) {
