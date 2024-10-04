@@ -196,6 +196,7 @@ int shell_execute(char **args) {
   previous_command = args;
   return shell_launch(args);
 }
+//uses most code from the ch5 hw for piping between two files
 int pipe_func(char **args) {
   int pipearr[2];
   pid_t pid1, pid2;
