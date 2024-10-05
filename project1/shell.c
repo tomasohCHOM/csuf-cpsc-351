@@ -12,6 +12,9 @@
 
 char *prev_args[SHELL_RL_BUFSIZE];
 
+
+int shell_execute(char **args);
+
 /*
   Function Declarations for builtin shell commands:
  */
@@ -19,7 +22,7 @@ int shell_help(char **args);
 int shell_cd(char **args);
 int shell_mkdir(char **args);
 int shell_exit(char **args);
-// int shell_exec_prev(char **args);
+int shell_exec_prev(char **args);
 
 /*
   List of builtin commands, followed by their corresponding functions.
@@ -29,6 +32,7 @@ char *builtin_str[] = {
   "cd",
   "mkdir",
   "exit",
+  "!!"
 };
 
 int (*builtin_func[]) (char **) = {
@@ -36,6 +40,7 @@ int (*builtin_func[]) (char **) = {
   &shell_cd,
   &shell_mkdir,
   &shell_exit,
+  &shell_exec_prev
 };
 
 int shell_num_builtins() {
@@ -105,15 +110,6 @@ int shell_cd(char **args) {
 }
 
 /**
-  @brief Builtin command: Recall previous command (!!)
-  @param args List of args. args[0] is "!!"
-  @return Always return 1, to continue executing
- */
-int shell_exec_prev(char **args) {
-  return 1;
-}
-
-/**
  * @brief Builtin command: mkdir.
  * @param args List of args. args[0] is "mkdir". args[1] is the directory name.
  * @return Always returns 1, to continue executing.
@@ -139,11 +135,50 @@ int shell_exit(char **args) {
 }
 
 /**
+  @brief Builtin command: Recall previous command (!!)
+  @param args List of args. args[0] is "!!"
+  @return Always return 1, to continue executing
+ */
+int shell_exec_prev(char **args) {
+  if (*prev_args == NULL) {
+    fprintf(stderr, "shell: no previous command\n");
+  } else {
+    shell_execute(prev_args);
+  }
+  return 1;
+}
+
+
+/**
+  @brief Echo command (Prints SPACE between elements and PIPE for each '|')
+  @param args List of args. Last element in args ends with ECHO
+  @return Always return 1, to continue executing
+ */
+int shell_echo(char **args) {
+  for (int j = 0; j < arr_len(args) - 1; j++) {
+    if (strcmp(args[j], "|") != 0) {
+      printf("%s\n", args[j]);
+    } else {
+      // (3) Print PIPE for each pipe character in the input
+      printf("PIPE\n");
+    }
+    // (2) Print SPACE for each character in the input
+    printf("SPACE\n");
+  }
+  return 1;
+}
+
+/**
   @brief Launch a program and wait for it to terminate.
   @param args Null terminated list of arguments (including program).
   @return Always returns 1, to continue execution.
  */
 int shell_launch(char **args) {
+  // Check for pipe characters
+  
+  // Check for redirect commands '>' and '<'
+
+
   pid_t pid;
   int status;
 
@@ -167,7 +202,7 @@ int shell_launch(char **args) {
   return 1;
 }
 
-// uses most code from the ch5 hw for piping between two files
+// Uses most code from the ch5 hw for piping between two files
 void pipe_func(char **args) {
   int pipearr[2];
   pid_t pid1, pid2;
@@ -193,46 +228,24 @@ void pipe_func(char **args) {
 int shell_execute(char **args) {
   int i;
 
+  // Check for empty command
   if (args[0] == NULL) {
-    // An empty command was entered.
     return 1;
   }
 
-  if (strcmp(args[0], "!!") == 0) {
-    if (*prev_args == NULL) {
-      fprintf(stderr, "shell: no previous command\n");
-    } else {
-      shell_execute(prev_args); // can add previous command definitions in other func
-    }
-    return 1;
-  }
-
+  // (1) Check for ECHO
   if (i > 0 && strcmp(args[arr_len(args) - 1], "ECHO") == 0) {
-    for (int j = 0; j < arr_len(args) - 1; j++) {
-      if (strcmp(args[j], "|") != 0) {
-        printf("%s\n", args[j]);
-      } else {
-        printf("PIPE\n");
-      }
-      printf("SPACE\n");
-    }
-    return 1;
+    return shell_echo(args);
   }
 
-  // Checks for pipe symbol, maybe runs another function to see a | b
-  // int j = 0;
-  // while (args[j] != NULL) {
-  //   if (strcmp(args[i], "|") == 0) {
-  //     pipe_func(args);
-  //   }
-  // }
-
+  // (4) Run built-in commands
   for (i = 0; i < shell_num_builtins(); i++) {
     if (strcmp(args[0], builtin_str[i]) == 0) {
       return (*builtin_func[i])(args);
     }
   }
 
+  // After this point, we execute non-built in commands
   return shell_launch(args);
 }
 
