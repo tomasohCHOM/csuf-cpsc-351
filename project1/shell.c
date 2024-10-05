@@ -7,8 +7,10 @@
 #include <string.h>
 
 #define SHELL_RL_BUFSIZE 1024
-#define shell_TOK_BUFSIZE 64
-#define shell_TOK_DELIM " \t\r\n\a"
+#define SHELL_TOK_BUFSIZE 64
+#define SHELL_TOK_DELIM " \t\r\n\a"
+
+char *prev_args[SHELL_RL_BUFSIZE];
 
 /*
   Function Declarations for builtin shell commands:
@@ -17,8 +19,8 @@ int shell_help(char **args);
 int shell_cd(char **args);
 int shell_mkdir(char **args);
 int shell_exit(char **args);
+// int shell_exec_prev(char **args);
 
-//this is for a commit test, leave comment pls
 /*
   List of builtin commands, followed by their corresponding functions.
  */
@@ -28,23 +30,39 @@ char *builtin_str[] = {
   "mkdir",
   "exit"
 };
-char previous_command = NULL;
 
 int (*builtin_func[]) (char **) = {
   &shell_help,
   &shell_cd,
   &shell_mkdir,
-  &shell_exit
+  &shell_exit,
 };
 
 int shell_num_builtins() {
   return sizeof(builtin_str) / sizeof(char *);
 }
 
+// Get the length of the array
+int arr_len(char **arr) {
+  int length = 0;
+  while (arr[length] != NULL) {
+    ++length;
+  }
+  return length;
+}
+
+// Save previous arguments
+void save_prev_args(char **src, char **dst) {
+  int i = 0;
+  while (src[i] != NULL) {
+    dst[i] = strdup(src[i]);
+    ++i;
+  }
+}
+
 /*
   Builtin function implementations.
 */
-
 /**
    @brief Builtin command: print help.
    @param args List of args.  Not examined.
@@ -85,8 +103,8 @@ int shell_cd(char **args) {
   @param args List of args. args[0] is "!!"
   @return Always return 1, to continue executing
  */
-int shell_previous_command(char **args) {
-  
+int shell_exec_prev(char **args) {
+  return 1;
 }
 
 /**
@@ -143,6 +161,24 @@ int shell_launch(char **args) {
   return 1;
 }
 
+// uses most code from the ch5 hw for piping between two files
+void pipe_func(char **args) {
+  int pipearr[2];
+  pid_t pid1, pid2;
+  if (pipe(pipearr) < 0) {fprintf(stderr, "Pipe process failed");}
+  pid1 = fork();
+  if (pid1 == 0) {
+    dup2(pipearr[1], STDOUT_FILENO);
+    close(pipearr[0]);
+    close(pipearr[1]);
+  }
+
+  pid2 = fork();
+  if (pid2 == 0) {
+    dup2(pipearr[0], STDIN_FILENO);
+  }
+}
+
 /**
    @brief Execute shell built-in or launch program.
    @param args Null terminated list of arguments.
@@ -155,20 +191,17 @@ int shell_execute(char **args) {
     // An empty command was entered.
     return 1;
   }
-  //previous_command = NULL;
-  if (strcmp(args[0], "!!") == 0) {
-    if (previous_command == NULL) {
-      fprintf(stderr, "there is no previous command");
-    } else {
-      shell_execute(previous_command); //can add previous command definitions in other func
-    }
-  }
-  // Check for ECHO
-  i = 0;
-  while (args[i] != NULL) {
-    i++;
-  }
-  if (i > 0 && strcmp(args[i - 1], "ECHO") == 0) {
+
+  // if (strcmp(args[0], "!!") == 0) {
+  //  if (*prev_args == NULL) {
+  //    fprintf(stderr, "there is no previous command");
+  //  } else {
+  //    shell_execute(prev_args); // can add previous command definitions in other func
+  //    return 1;
+  //  }
+  // }
+
+  if (i > 0 && strcmp(args[arr_len(args) - 1], "ECHO") == 0) {
     for (int j = 0; j < i - 1; j++) {
       if (strcmp(args[j], "|") != 0) {
         printf("%s\n", args[j]);
@@ -179,41 +212,25 @@ int shell_execute(char **args) {
     }
     return 1;
   }
-  //checks for pipe symbol, maybe runs another function to see a | b
-  int j = 0;
-  while (args[j] != NULL) {
-    if (strcmp(args[i], "|") == 0) {
-      pipe_func(args);
-    }
-  }
-  return 1;
+
+  // Checks for pipe symbol, maybe runs another function to see a | b
+  // int j = 0;
+  // while (args[j] != NULL) {
+  //   if (strcmp(args[i], "|") == 0) {
+  //     pipe_func(args);
+  //   }
+  // }
 
   for (i = 0; i < shell_num_builtins(); i++) {
     if (strcmp(args[0], builtin_str[i]) == 0) {
       return (*builtin_func[i])(args);
     }
   }
-  previous_command = args;
+
+  // save_prev_args(args, prev_args);
   return shell_launch(args);
 }
-//uses most code from the ch5 hw for piping between two files
-int pipe_func(char **args) {
-  int pipearr[2];
-  pid_t pid1, pid2;
-  if (pipe(pipearr) < 0) {fprintf(stderr, "Pipe process failed");}
-  pid1 = fork();
-  if (pid1 == 0) {
-    dup2(pipearr[1],STDOUT_FILENO);
-    close(pipearr[0]);
-    close(pipearr[1]);
-  }
 
-  pid2 = fork();
-  if (pid2 == 0) {
-    dup2(pipearr[0], STDIN_FILENO);
-
-  }
-}
 /**
    @brief Read a line of input from stdin.
    @return The line from stdin.
@@ -261,7 +278,7 @@ char *shell_read_line(void) {
    @return Null-terminated array of tokens.
  */
 char **shell_split_line(char *line) {
-  int bufsize = shell_TOK_BUFSIZE, position = 0;
+  int bufsize = SHELL_TOK_BUFSIZE, position = 0;
   char **tokens = malloc(bufsize * sizeof(char*));
   char *token, **tokens_backup;
 
@@ -270,13 +287,13 @@ char **shell_split_line(char *line) {
     exit(EXIT_FAILURE);
   }
 
-  token = strtok(line, shell_TOK_DELIM);
+  token = strtok(line, SHELL_TOK_DELIM);
   while (token != NULL) {
     tokens[position] = token;
     position++;
 
     if (position >= bufsize) {
-      bufsize += shell_TOK_BUFSIZE;
+      bufsize += SHELL_TOK_BUFSIZE;
       tokens_backup = tokens;
       tokens = realloc(tokens, bufsize * sizeof(char*));
       if (!tokens) {
@@ -286,7 +303,7 @@ char **shell_split_line(char *line) {
       }
     }
 
-    token = strtok(NULL, shell_TOK_DELIM);
+    token = strtok(NULL, SHELL_TOK_DELIM);
   }
   tokens[position] = NULL;
   return tokens;
