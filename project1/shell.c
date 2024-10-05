@@ -11,13 +11,19 @@
 #define SHELL_TOK_BUFSIZE 64
 #define SHELL_TOK_DELIM " \t\r\n\a"
 
+// Save previous arguments here
 char *prev_args[SHELL_RL_BUFSIZE];
 
-
+/*
+ * Shell Function Declarations
+ */
+void shell_loop();
+char *shell_read_line(void);
+char **shell_split_line(char *line);
 int shell_execute(char **args);
 
 /*
-  Function Declarations for builtin shell commands:
+ * Function Declarations for builtin shell commands:
  */
 int shell_help(char **args);
 int shell_cd(char **args);
@@ -26,7 +32,7 @@ int shell_exit(char **args);
 int shell_exec_prev(char **args);
 
 /*
-  List of builtin commands, followed by their corresponding functions.
+ * List of builtin commands, followed by their corresponding functions.
  */
 char *builtin_str[] = {
   "help",
@@ -72,9 +78,6 @@ void save_prev_args(char **src, char **dst) {
   }
 }
 
-/*
-  Builtin function implementations.
-*/
 /**
    @brief Builtin command: print help.
    @param args List of args.  Not examined.
@@ -169,53 +172,69 @@ int shell_echo(char **args) {
   return 1;
 }
 
-int execute_with_piping(char **args1, char **args2) {
-  int pipefd[2];
-  pid_t pid1, pid2;
-  int status;
 
+// (7) Fork/exec two programs with pipes between them
+int execute_with_piping(char **args1, char **args2) {
+  int pipefd[2];  // Array to hold the pipe file descriptors
+  pid_t pid1, pid2;
+
+  // Create the pipe
   if (pipe(pipefd) == -1) {
     perror("pipe");
-    return 1;
+    return -1;  // Error creating pipe
   }
 
-  pid1 = fork();
-  if (pid1 == 0) {
-    // Child process 1: redirect stdout to the pipe
+  // First child process
+  if ((pid1 = fork()) == -1) {
+    perror("fork");
+    return -1;  // Error forking
+  }
+
+  if (pid1 == 0) {  // Child process for the first command
+    // Redirect stdout to the write end of the pipe
     dup2(pipefd[1], STDOUT_FILENO);
-    close(pipefd[0]);  // Close unused read end
-    close(pipefd[1]);  // Close write end
-    execvp(args1[0], args1);
-    perror("shell");
-    exit(EXIT_FAILURE);
-  } else if (pid1 < 0) {
-    perror("fork");
-    return 1;
+    close(pipefd[0]);  // Close read end of the pipe
+    close(pipefd[1]);  // Close write end of the pipe (not needed in child)
+
+    // Execute the first command
+    if (execvp(args1[0], args1) == -1) {
+      perror("execvp");
+      exit(EXIT_FAILURE);  // Exit child process on failure
+    }
   }
 
-  pid2 = fork();
-  if (pid2 == 0) {
-    // Child process 2: redirect stdin from the pipe
+  // Second child process
+  if ((pid2 = fork()) == -1) {
+    perror("fork");
+    return -1;  // Error forking
+  }
+
+  if (pid2 == 0) {  // Child process for the second command
+    // Redirect stdin to the read end of the pipe
     dup2(pipefd[0], STDIN_FILENO);
-    close(pipefd[1]);  // Close unused write end
-    close(pipefd[0]);  // Close read end
-    execvp(args2[0], args2);
-    perror("shell");
-    exit(EXIT_FAILURE);
-  } else if (pid2 < 0) {
-    perror("fork");
-    return 1;
+    close(pipefd[1]);  // Close write end of the pipe
+    close(pipefd[0]);  // Close read end of the pipe (not needed in child)
+
+    // Execute the second command
+    if (execvp(args2[0], args2) == -1) {
+      perror("execvp");
+      exit(EXIT_FAILURE);  // Exit child process on failure
+    }
   }
 
-  // Parent process closes pipe ends and waits for both children
-  close(pipefd[0]);
-  close(pipefd[1]);
-  waitpid(pid1, &status, 0);
-  waitpid(pid2, &status, 0);
+  // Parent process
+  close(pipefd[0]);  // Close read end of the pipe in parent
+  close(pipefd[1]);  // Close write end of the pipe in parent
 
-  return 1;
+  // Wait for both child processes to finish
+  waitpid(pid1, NULL, 0);
+  waitpid(pid2, NULL, 0);
+
+  return 1;  // Success
 }
 
+
+// (6) Fork/exec command WITH command line redirection
 int execute_with_redirection(char **args, char *input_file, char *output_file) {
   pid_t pid;
   int status;
@@ -267,18 +286,15 @@ int execute_with_redirection(char **args, char *input_file, char *output_file) {
  */
 int shell_launch(char **args) {
   // Variables for pipes and redirection
-  int pipe_index = -1;
-  char *pipe_pos = NULL;
   char *input_file = NULL;
   char *output_file = NULL;
+  char **pipe_pos = args;
+  int pipe_index = 0;
 
-  // Check for pipe characters
-  for (int i = 0; args[i] != NULL; i++) {
-    if (strcmp(args[i], "|") == 0) {
-      pipe_pos = args[i];
-      pipe_index = i;
-      break;
-    }
+  // Check for any pipes in the input
+  while (*pipe_pos != NULL && strcmp(*pipe_pos, "|") != 0) {
+    pipe_pos++;
+    pipe_index++;
   }
 
   // Check for redirect commands '>' and '<'
@@ -293,13 +309,16 @@ int shell_launch(char **args) {
   }
 
   // Decide which execution path to take based on the existence of pipes or redirection
-  if (pipe_pos) {
-    // Handle pipes
-    char **args1 = args;
-    char **args2 = &args[pipe_index + 1];
+  if (*pipe_pos != NULL) {
+    char *args1[SHELL_RL_BUFSIZE];
+    for (int i = 0; i < pipe_index; i++) {
+      args1[i] = args[i];
+    }
+    args1[pipe_index] = NULL;
+    char **args2 = pipe_pos + 1;
+
     return execute_with_piping(args1, args2);
   } else if (input_file || output_file) {
-    // Handle redirection
     return execute_with_redirection(args, input_file, output_file);
   }
 
@@ -459,3 +478,4 @@ int main(int argc, char **argv) {
 
   return EXIT_SUCCESS;
 }
+
