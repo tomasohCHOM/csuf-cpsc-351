@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
 
 #define SHELL_RL_BUFSIZE 1024
 #define SHELL_TOK_BUFSIZE 64
@@ -81,7 +82,7 @@ void save_prev_args(char **src, char **dst) {
  */
 int shell_help(char **args) {
   int i;
-  printf("CPSC 351 Project 1 Shell\n");
+  printf("CPSC 351 UNIX Shell, made by Tomas Oh and Max Rivas\n");
   printf("Type program names and arguments, and hit enter.\n");
   printf("The following are built in:\n");
 
@@ -150,7 +151,7 @@ int shell_exec_prev(char **args) {
 
 
 /**
-  @brief Echo command (Prints SPACE between elements and PIPE for each '|')
+  @brief (1) Echo command (Prints SPACE between elements and PIPE for each '|')
   @param args List of args. Last element in args ends with ECHO
   @return Always return 1, to continue executing
  */
@@ -168,56 +169,163 @@ int shell_echo(char **args) {
   return 1;
 }
 
+int execute_with_piping(char **args1, char **args2) {
+  int pipefd[2];
+  pid_t pid1, pid2;
+  int status;
+
+  if (pipe(pipefd) == -1) {
+    perror("pipe");
+    return 1;
+  }
+
+  pid1 = fork();
+  if (pid1 == 0) {
+    // Child process 1: redirect stdout to the pipe
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[0]);  // Close unused read end
+    close(pipefd[1]);  // Close write end
+    execvp(args1[0], args1);
+    perror("shell");
+    exit(EXIT_FAILURE);
+  } else if (pid1 < 0) {
+    perror("fork");
+    return 1;
+  }
+
+  pid2 = fork();
+  if (pid2 == 0) {
+    // Child process 2: redirect stdin from the pipe
+    dup2(pipefd[0], STDIN_FILENO);
+    close(pipefd[1]);  // Close unused write end
+    close(pipefd[0]);  // Close read end
+    execvp(args2[0], args2);
+    perror("shell");
+    exit(EXIT_FAILURE);
+  } else if (pid2 < 0) {
+    perror("fork");
+    return 1;
+  }
+
+  // Parent process closes pipe ends and waits for both children
+  close(pipefd[0]);
+  close(pipefd[1]);
+  waitpid(pid1, &status, 0);
+  waitpid(pid2, &status, 0);
+
+  return 1;
+}
+
+int execute_with_redirection(char **args, char *input_file, char *output_file) {
+  pid_t pid;
+  int status;
+
+  pid = fork();
+  if (pid == 0) {
+    // Child process: handle redirection
+    if (input_file) {
+      int in_fd = open(input_file, O_RDONLY);
+      if (in_fd < 0) {
+        perror("shell");
+        exit(EXIT_FAILURE);
+      }
+      dup2(in_fd, STDIN_FILENO);  // Redirect stdin to input file
+      close(in_fd);
+    }
+    if (output_file) {
+      int out_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      if (out_fd < 0) {
+        perror("shell");
+        exit(EXIT_FAILURE);
+      }
+      dup2(out_fd, STDOUT_FILENO);  // Redirect stdout to output file
+      close(out_fd);
+    }
+
+    if (execvp(args[0], args) == -1) {
+      perror("shell");
+    }
+    exit(EXIT_FAILURE);
+  } else if (pid < 0) {
+    perror("fork");
+    return 1;
+  }
+
+  // Parent process waits for the child
+  do {
+    waitpid(pid, &status, WUNTRACED);
+  } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+
+  return 1;
+}
+
+
 /**
   @brief Launch a program and wait for it to terminate.
   @param args Null terminated list of arguments (including program).
   @return Always returns 1, to continue execution.
  */
 int shell_launch(char **args) {
+  // Variables for pipes and redirection
+  int pipe_index = -1;
+  char *pipe_pos = NULL;
+  char *input_file = NULL;
+  char *output_file = NULL;
+
   // Check for pipe characters
-  
+  for (int i = 0; args[i] != NULL; i++) {
+    if (strcmp(args[i], "|") == 0) {
+      pipe_pos = args[i];
+      pipe_index = i;
+      break;
+    }
+  }
+
   // Check for redirect commands '>' and '<'
+  for (int i = 0; args[i] != NULL; i++) {
+    if (strcmp(args[i], ">") == 0) {
+      output_file = args[i + 1];
+      args[i] = NULL;  // Remove the redirection part from args
+    } else if (strcmp(args[i], "<") == 0) {
+      input_file = args[i + 1];
+      args[i] = NULL;  // Remove the redirection part from args
+    }
+  }
 
+  // Decide which execution path to take based on the existence of pipes or redirection
+  if (pipe_pos) {
+    // Handle pipes
+    char **args1 = args;
+    char **args2 = &args[pipe_index + 1];
+    return execute_with_piping(args1, args2);
+  } else if (input_file || output_file) {
+    // Handle redirection
+    return execute_with_redirection(args, input_file, output_file);
+  }
 
+  // (5) Fork/exec command WITHOUT command line redirection
   pid_t pid;
   int status;
 
   pid = fork();
   if (pid == 0) {
-    // Child process
+    // Child process: execute the command
     if (execvp(args[0], args) == -1) {
       perror("shell");
     }
     exit(EXIT_FAILURE);
   } else if (pid < 0) {
     // Error forking
-    perror("shell");
-  } else {
-    // Parent process
-    do {
-      waitpid(pid, &status, WUNTRACED);
-    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+    perror("fork");
+    return 1;
   }
+
+  // Parent process: wait for the child to finish
+  do {
+    waitpid(pid, &status, WUNTRACED);
+  } while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
   return 1;
-}
-
-// Uses most code from the ch5 hw for piping between two files
-void pipe_func(char **args) {
-  int pipearr[2];
-  pid_t pid1, pid2;
-  if (pipe(pipearr) < 0) {fprintf(stderr, "Pipe process failed");}
-  pid1 = fork();
-  if (pid1 == 0) {
-    dup2(pipearr[1], STDOUT_FILENO);
-    close(pipearr[0]);
-    close(pipearr[1]);
-  }
-
-  pid2 = fork();
-  if (pid2 == 0) {
-    dup2(pipearr[0], STDIN_FILENO);
-  }
 }
 
 /**
@@ -233,7 +341,7 @@ int shell_execute(char **args) {
     return 1;
   }
 
-  // (1) Check for ECHO
+  // Check for ECHO at the end of the input
   if (i > 0 && strcmp(args[arr_len(args) - 1], "ECHO") == 0) {
     return shell_echo(args);
   }
