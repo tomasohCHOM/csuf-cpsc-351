@@ -28,7 +28,7 @@ char *builtin_str[] = {
   "help",
   "cd",
   "mkdir",
-  "exit"
+  "exit",
 };
 
 int (*builtin_func[]) (char **) = {
@@ -56,6 +56,12 @@ void save_prev_args(char **src, char **dst) {
   int i = 0;
   while (src[i] != NULL) {
     dst[i] = strdup(src[i]);
+    ++i;
+  }
+  // Remove trailing args from previous command
+  while (dst[i] != NULL) {
+    free(dst[i]);
+    dst[i] = NULL;
     ++i;
   }
 }
@@ -192,17 +198,17 @@ int shell_execute(char **args) {
     return 1;
   }
 
-  // if (strcmp(args[0], "!!") == 0) {
-  //  if (*prev_args == NULL) {
-  //    fprintf(stderr, "there is no previous command");
-  //  } else {
-  //    shell_execute(prev_args); // can add previous command definitions in other func
-  //    return 1;
-  //  }
-  // }
+  if (strcmp(args[0], "!!") == 0) {
+    if (*prev_args == NULL) {
+      fprintf(stderr, "shell: no previous command\n");
+    } else {
+      shell_execute(prev_args); // can add previous command definitions in other func
+    }
+    return 1;
+  }
 
   if (i > 0 && strcmp(args[arr_len(args) - 1], "ECHO") == 0) {
-    for (int j = 0; j < i - 1; j++) {
+    for (int j = 0; j < arr_len(args) - 1; j++) {
       if (strcmp(args[j], "|") != 0) {
         printf("%s\n", args[j]);
       } else {
@@ -227,7 +233,6 @@ int shell_execute(char **args) {
     }
   }
 
-  // save_prev_args(args, prev_args);
   return shell_launch(args);
 }
 
@@ -319,6 +324,8 @@ void shell_loop(void) {
     line = shell_read_line();
     args = shell_split_line(line);
     status = shell_execute(args);
+
+    save_prev_args(args, prev_args);
 
     free(line);
     free(args);
