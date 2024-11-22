@@ -23,7 +23,7 @@ void *philosopher(void *num) {
   while (1) {
     // Philosopher is thinking
     print_message("P#%d THINKING.\n", id);
-    sleep(rand() % 3 + 1);
+    sleep(1);
 
     if (id % 2 == 0) { // If id is even, pick up right chopstick first
       print_message("P#%d picked up right chopstick.\n", id);
@@ -41,7 +41,7 @@ void *philosopher(void *num) {
 
     // Philosopher now eating
     print_message("P#%d EATING.\n", id);
-    sleep(rand() % 3 + 1);
+    sleep(1);
 
     // Put down left chopstick
     sem_post(&chopsticks[left_chopstick]);
