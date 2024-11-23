@@ -5,7 +5,7 @@
 #include <vector>
 #include <chrono>
 
-#define N 5
+const int N = 5;
 
 enum class State { THINKING, HUNGRY, EATING };
 
@@ -19,32 +19,27 @@ void print_message(const std::string &message) {
 class DiningPhilosophersMonitor {
 private:
   State state[N];
-  bool chopsticks[N];
   std::mutex mtx;
   std::condition_variable cv[N];
 
-  // Get the left neighbor of philosopher with id 1
+  // Get the left neighbor of philosopher with given id
   int left_neighbor(int id) {
     return (id + N - 1) % N;
   }
-  // Get the right neighbor of philosopher with id 1
+  // Get the right neighbor of philosopher with given id
   int right_neighbor(int id) {
     return (id + 1) % N;
   }
 
   void try_eat(int id) {
-    if (state[id] == State::HUNGRY && !chopsticks[left_neighbor(id)] && !chopsticks[right_neighbor(id)]) {
-      state[id] = State::EATING;
-
+    if (state[id] == State::HUNGRY &&
+        state[left_neighbor(id)] != State::EATING &&
+        state[right_neighbor(id)] != State::EATING) {
       // Philosopher now starts eating
-      print_message("P#" + std::to_string(id) + " EATING.");
-
-      chopsticks[left_neighbor(id)] = true;
       print_message("P#" + std::to_string(id) + " picked up left chopstick.");
-
-      chopsticks[right_neighbor(id)] = true;
       print_message("P#" + std::to_string(id) + " picked up right chopstick.");
 
+      state[id] = State::EATING;
       cv[id].notify_all();
     }
   }
@@ -53,7 +48,6 @@ public:
   DiningPhilosophersMonitor() {
     for (int i = 0; i < N; ++i) {
       state[i] = State::THINKING;
-      chopsticks[i] = false;
     }
   }
 
@@ -64,32 +58,27 @@ public:
     state[id] = State::HUNGRY;
     print_message("P#" + std::to_string(id) + " HUNGRY.");
 
+    // Attempt to eat if both chopsticks available
     try_eat(id);
-
-    while (state[id] != State::EATING) {
-      if (chopsticks[left_neighbor(id)]) {
-        print_message("P#" + std::to_string(id) + " WAITING for left chopstick.");
-      }
-      if (chopsticks[right_neighbor(id)]) {
-        print_message("P#" + std::to_string(id) + " WAITING for right chopstick.");
-      }
-      cv[id].wait(lock);
+    // If unable to eat, wait until the other philosophers stop eating
+    if (state[id] != State::EATING) {
+      print_message("P#" + std::to_string(id) + " WAITING for chopsticks.");
+      cv[id].wait(lock, [this, id]() { return state[id] == State::EATING; });
     }
   }
 
   void putdown_chopsticks(int id) {
     std::unique_lock<std::mutex> lock(mtx);
 
-    chopsticks[left_neighbor(id)] = false;
     print_message("P#" + std::to_string(id) + " put down left chopstick.");
-
-    chopsticks[right_neighbor(id)] = false;
     print_message("P#" + std::to_string(id) + " put down right chopstick.");
 
-    state[id] = State::THINKING;
+    // Finished eating, return to THINKING state
     print_message("P#" + std::to_string(id) + " finished eating and is THINKING again.");
-
-    cv[id].notify_all();
+    state[id] = State::THINKING;
+    // Check whether neighbors can start eating now
+    try_eat(left_neighbor(id));
+    try_eat(right_neighbor(id));
   }
 };
 
@@ -102,6 +91,7 @@ void philosopher(DiningPhilosophersMonitor& monitor, int id) {
     monitor.pickup_chopsticks(id);
 
     // EATING state
+    print_message("P#" + std::to_string(id) + " EATING.");
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     // Puts down chopsticks, THINKING state now
