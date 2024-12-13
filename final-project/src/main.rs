@@ -1,3 +1,8 @@
+use std::collections::HashMap;
+
+const BLOCK_SIZE: usize = 4096;
+const NUM_DIRECT_POINTERS: usize = 10;
+
 #[derive(Clone, Debug)]
 enum FileType {
     RegularFile,
@@ -12,7 +17,7 @@ struct Inode {
     size: u64,
     file_type: FileType,
     direct_pointers: [Option<u64>; 10],
-    entries: Option<Vec<u64>>,
+    entries: Option<Vec<u64>>, // For directories only
 }
 
 // Journal Entry
@@ -23,6 +28,160 @@ struct JournalEntry {
 // Journal Structure
 struct Journal {
     entries: Vec<JournalEntry>,
+}
+
+impl Journal {
+    fn new() -> Self {
+        return Self {
+            entries: Vec::new(),
+        };
+    }
+
+    fn add_entry(&mut self, operation: String) {
+        self.entries.push(JournalEntry {
+            operation,
+            committed: true,
+        });
+    }
+
+    fn undo(&mut self) -> Option<String> {
+        return self.entries.pop().map(|entry| entry.operation);
+    }
+
+    fn print_journal(&mut self) {
+        println!("Journal Entries");
+        for (i, entry) in self.entries.iter().enumerate() {
+            println!(
+                "  {}. {} [Committed: {}]",
+                i + 1,
+                entry.operation,
+                entry.committed
+            );
+        }
+    }
+}
+
+struct FileSystem {
+    inodes: HashMap<u64, Inode>,
+    blocks: HashMap<u64, Vec<u8>>,
+    journal: Journal,
+    next_inode_id: u64,
+}
+
+impl FileSystem {
+    fn new() -> Self {
+        return Self {
+            inodes: HashMap::new(),
+            blocks: HashMap::new(),
+            journal: Journal::new(),
+            next_inode_id: 1,
+        };
+    }
+
+    fn create_directory(&mut self, name: &str) -> u64 {
+        let id = self.next_inode_id;
+        self.next_inode_id += 1;
+
+        let dir = Inode {
+            id,
+            name: name.to_string(),
+            size: 0,
+            file_type: FileType::Directory,
+            direct_pointers: [None; NUM_DIRECT_POINTERS],
+            entries: Some(Vec::new()),
+        };
+
+        self.inodes.insert(id, dir);
+        self.journal
+            .add_entry(format!("CREATE DIRECTORY: {}", name));
+        return self.next_inode_id;
+    }
+
+    fn create_file(&mut self, name: &str) -> u64 {
+        let id = self.next_inode_id;
+        self.next_inode_id += 1;
+
+        let file = Inode {
+            id,
+            name: name.to_string(),
+            size: 0,
+            file_type: FileType::RegularFile,
+            direct_pointers: [None; NUM_DIRECT_POINTERS],
+            entries: None,
+        };
+        self.inodes.insert(id, file);
+        self.journal.add_entry(format!("CREATE FILE: {}", name));
+        return id;
+    }
+
+    fn add_file_to_directory(&mut self, file_id: u64, dir_id: u64) {
+        if let Some(dir_inode) = self.inodes.get_mut(&dir_id) {
+            if let Some(entries) = dir_inode.entries.as_mut() {
+                entries.push(file_id);
+                self.journal
+                    .add_entry(format!("ADD FILE: {} TO DIRECTORY: {}", file_id, dir_id))
+            }
+        }
+    }
+
+    fn write_to_file(&mut self, file_id: u64, data: &[u8]) {
+        if let Some(file_inode) = self.inodes.get_mut(&file_id) {
+            let mut blocks_needed = (data.len() + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            let mut data_offset = 0;
+
+            for i in 0..NUM_DIRECT_POINTERS {
+                if blocks_needed == 0 {
+                    break;
+                }
+                let block_id = self.next_inode_id;
+                self.next_inode_id += 1;
+                let block_data = data[data_offset..data_offset.min(data.len())].to_vec();
+                self.blocks.insert(block_id, block_data);
+                file_inode.direct_pointers[i] = Some(block_id);
+                blocks_needed -= 1;
+                data_offset += BLOCK_SIZE;
+            }
+
+            file_inode.size = data.len() as u64;
+            self.journal.add_entry(format!("WRITE FILE: {}", file_id));
+        }
+    }
+
+    fn read_file(&self, file_id: u64) -> Vec<u8> {
+        if let Some(file_inode) = self.inodes.get(&file_id) {
+            let mut data = Vec::new();
+            for pointer in file_inode.direct_pointers {
+                if let Some(block_id) = pointer {
+                    if let Some(block_data) = self.blocks.get(&block_id) {
+                        data.extend_from_slice(block_data);
+                    }
+                }
+            }
+            return data;
+        }
+        return Vec::new();
+    }
+
+    fn list_directories_and_files(&self) {
+        for inode in self.inodes.values() {
+            match inode.file_type {
+                FileType::Directory => {
+                    println!("Directory {} (ID: {})", inode.name, inode.id);
+                    if let Some(entries) = &inode.entries {
+                        for entry_id in entries {
+                            if let Some(entry) = self.inodes.get(&entry_id) {
+                                println!(
+                                    " - File {} (ID: {}, Size: {} bytes)",
+                                    entry.name, entry.id, entry.size
+                                );
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn main() {
