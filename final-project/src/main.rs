@@ -94,7 +94,7 @@ impl FileSystem {
         self.inodes.insert(id, dir);
         self.journal
             .add_entry(format!("CREATE DIRECTORY: {}", name));
-        return self.next_inode_id;
+        return id;
     }
 
     fn create_file(&mut self, name: &str) -> u64 {
@@ -133,27 +133,33 @@ impl FileSystem {
                 if blocks_needed == 0 {
                     break;
                 }
+
                 let block_id = self.next_inode_id;
                 self.next_inode_id += 1;
-                let block_data = data[data_offset..data_offset.min(data.len())].to_vec();
+
+                let end_offset = (data_offset + BLOCK_SIZE).min(data.len());
+                let block_data = data[data_offset..end_offset].to_vec();
+
+                // Write to the block storage
                 self.blocks.insert(block_id, block_data);
                 file_inode.direct_pointers[i] = Some(block_id);
-                blocks_needed -= 1;
-                data_offset += BLOCK_SIZE;
-            }
 
+                blocks_needed -= 1;
+                data_offset = end_offset;
+            }
             file_inode.size = data.len() as u64;
-            self.journal.add_entry(format!("WRITE FILE: {}", file_id));
         }
     }
 
     fn read_file(&self, file_id: u64) -> Vec<u8> {
         if let Some(file_inode) = self.inodes.get(&file_id) {
             let mut data = Vec::new();
-            for pointer in file_inode.direct_pointers {
+            for pointer in file_inode.direct_pointers.iter() {
                 if let Some(block_id) = pointer {
                     if let Some(block_data) = self.blocks.get(&block_id) {
                         data.extend_from_slice(block_data);
+                    } else {
+                        eprintln!("Warning: Block {} not found for file {}", block_id, file_id);
                     }
                 }
             }
@@ -166,9 +172,9 @@ impl FileSystem {
         for inode in self.inodes.values() {
             match inode.file_type {
                 FileType::Directory => {
-                    println!("Directory {} (ID: {})", inode.name, inode.id);
+                    println!("Directory {} (ID: {}):", inode.name, inode.id);
                     if let Some(entries) = &inode.entries {
-                        for entry_id in entries {
+                        for &entry_id in entries {
                             if let Some(entry) = self.inodes.get(&entry_id) {
                                 println!(
                                     " - File {} (ID: {}, Size: {} bytes)",
@@ -211,7 +217,7 @@ fn main() {
     // Read from file
     let data = fs.read_file(file1);
     println!("\n=== Read File ===");
-    println!("File Data: {}", String::from_utf8_lossy(&data));
+    println!("File Data: {}", String::from_utf8_lossy(&data),);
 
     // Print journal
     println!("\n=== Journal ===");
